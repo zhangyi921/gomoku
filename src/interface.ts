@@ -16,13 +16,13 @@ export interface Room {
 }
 
 export enum Event {
-  win,
-  admitDefeat,
-  requestToUndo,
-  undoAccepted,
-  undoDeclined,
-  move,
-  updateStatus,
-  joined,
-  left,
+  win = 'win',
+  admitDefeat = 'admitDefeat',
+  requestToUndo = 'requestToUndo',
+  undoAccepted = 'undoAccepted',
+  undoDeclined = 'undoDeclined',
+  move = 'move',
+  updateStatus = 'updateStatus',
+  joined = 'joined',
+  left = 'left',
 }

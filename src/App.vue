@@ -43,7 +43,7 @@
     </transition>
 
     <br><br>
-    <h6>v1.0.3</h6>
+    <h6>v1.1.1</h6>
   </div>
 </template>
 
@@ -90,8 +90,8 @@ export default defineComponent({
           }
           // gaming
           else if (
-            rooms[id].player1.name !== "" &&
-            rooms[id].player2.name !== ""
+            rooms[id].player1.event !== Event.left &&
+            rooms[id].player2.event !== Event.left
           ) {
             hall.value[id] = "o";
           } else {

@@ -4,18 +4,16 @@
       <a-input
         v-model:value="name"
         placeholder="Put your name here"
-        @pressEnter="enterRoom"
+        @pressEnter="updateName"
         :maxlength="20"
         :allowClear="true"
       />
       <template #footer>
-        <a-button key="submit" type="primary" @click="$emit('exit')">
-          Exit
-        </a-button>
+        <a-button key="submit" type="primary" @click="exit"> Exit </a-button>
         <a-button
           key="submit"
           type="primary"
-          @click="enterRoom"
+          @click="updateName"
           :disabled="name == ''"
         >
           OK
@@ -44,7 +42,7 @@
           <div class="white-peice" style="margin: auto" v-else></div>
         </td>
       </tr>
-      <tr v-if="otherPlayer.name != ''">
+      <tr v-if="otherPlayer.event != Event.left">
         <td>
           <ArrowRightOutlined style="width: 30px" v-if="!myTurn" />
         </td>
@@ -98,8 +96,12 @@
     </div>
     <br />
     <a-space>
-      <a-button @click="admitDefeat" :disabled="!playersReady">Admit defeat</a-button>
-      <a-button @click="undo" :disabled="myTurn || lastMove.col === -1">Undo</a-button>
+      <a-button @click="admitDefeat" :disabled="!playersReady"
+        >Admit defeat</a-button
+      >
+      <a-button @click="undo" :disabled="myTurn || lastMove.col === -1"
+        >Undo</a-button
+      >
       <a-button @click="exit">Exit<LogoutOutlined /></a-button>
     </a-space>
   </div>
@@ -138,7 +140,6 @@ export default defineComponent({
     const currentPlayer = ref(player);
     const otherPlayer = ref(player);
     const myTurn = ref(true);
-    // let roomReady = false;
     const roomRef = firebase.database().ref(props.roomId);
     const lastMove = ref({ col: -1, row: -1 });
     const playerToMove = computed((): string => {
@@ -158,13 +159,10 @@ export default defineComponent({
       firebase.database().ref(props.roomId).update(roomUpdate);
     };
     const exit = () => {
-      const playerUpdate = {} as Player;
-      playerUpdate.name = "";
-      playerUpdate.event = Event.left;
-      currentPlayerRef.update(playerUpdate);
+      currentPlayerRef.update({event: Event.left, ready: false, name: ''} as Player);
       context.emit("exit");
     };
-
+    
     // setup board
     const clearBoard = () => {
       for (let i = 0; i < 15; ++i) {
@@ -172,12 +170,39 @@ export default defineComponent({
       }
       lastMove.value = { col: -1, row: -1 };
     };
+    const IWin = () => {
+      // i win!
+      Modal.success({
+        title: `You won!`,
+        onOk() {
+          clearBoard();
+          const readyUpdate = {} as Player;
+          readyUpdate.ready = true;
+          readyUpdate.event = Event.updateStatus;
+          currentPlayerRef.update(readyUpdate);
+        },
+      });
+      const playerUpdate = {} as Player;
+      playerUpdate.event = Event.win;
+      // switch color
+      playerUpdate.color = currentPlayer.value.color === "w" ? "b" : "w";
+      myTurn.value = playerUpdate.color === "w" ? false : true;
+      playerUpdate.ready = false;
+      currentPlayerRef.update(playerUpdate);
+
+      // update other player's status
+      const otherPlayerUpdate = {} as Player;
+      otherPlayerUpdate.color = otherPlayer.value.color === "w" ? "b" : "w";
+      otherPlayerUpdate.ready = false;
+      otherPlayerUpdate.event = Event.updateStatus;
+      otherPlayerRef.update(otherPlayerUpdate);
+      updateTime();
+    };
     clearBoard();
     const placePiece = (row: number, col: number) => {
       if (
         board.value[row][col] !== "e" ||
         !myTurn.value ||
-        // !roomReady ||
         !playersReady.value
       )
         return;
@@ -191,32 +216,8 @@ export default defineComponent({
       } as Player;
       currentPlayerRef.update(playerUpdate);
       if (check(board.value) === currentPlayer.value.color) {
-        Modal.success({
-          title: `You won!`,
-          onOk() {
-            clearBoard();
-            const readyUpdate = {} as Player;
-            readyUpdate.ready = true;
-            readyUpdate.event = Event.updateStatus;
-            currentPlayerRef.update(readyUpdate);
-          },
-        });
-        // i win!
-        playerUpdate.event = Event.win;
-        // switch color
-        playerUpdate.color = currentPlayer.value.color === "w" ? "b" : "w";
-        myTurn.value = playerUpdate.color === "w" ? false : true;
-        playerUpdate.ready = false;
-        currentPlayerRef.update(playerUpdate);
-
-        // update other player's status
-        const otherPlayerUpdate = {} as Player;
-        otherPlayerUpdate.color = otherPlayer.value.color === "w" ? "b" : "w";
-        otherPlayerUpdate.ready = false;
-        otherPlayerUpdate.event = Event.updateStatus;
-        otherPlayerRef.update(otherPlayerUpdate);
-      }
-      else{
+        IWin()
+      } else {
         myTurn.value = false;
       }
       lastMove.value = playerUpdate.move;
@@ -224,12 +225,8 @@ export default defineComponent({
     };
 
     // setup room
-    const enterRoom = async () => {
-      if (name.value === "") {
-        message.warning("Name cannot be empty.");
-        return;
-      }
-      const roomInfo = (await roomRef.once("value")).val() as Room;
+    roomRef.once("value", (snapshot) => {
+      const roomInfo = snapshot.val() as Room;
       const playerUpdate = {} as Player;
       if (
         roomInfo === null ||
@@ -245,7 +242,7 @@ export default defineComponent({
             color: "w",
             ready: false,
             move: { col: -1, row: -1 },
-            event: Event.updateStatus,
+            event: Event.joined,
           },
           player2: {
             name: "",
@@ -259,12 +256,9 @@ export default defineComponent({
         roomRef.set(roomUpdate);
         playerUpdate.color = "b";
       } else {
-        const me = roomInfo.player1.name === "" ? "player1" : "player2";
-        const other = roomInfo.player1.name === "" ? "player2" : "player1";
-        if (name.value === roomInfo[other].name) {
-          message.warning("This name is same as other player's name!");
-          return;
-        }
+        const me = roomInfo.player1.event === Event.left ? "player1" : "player2";
+        const other = roomInfo.player1.event === Event.left ? "player2" : "player1";
+        
         myTurn.value = false;
         playerUpdate.color = "w";
         currentPlayerRef = firebase.database().ref(`${props.roomId}/${me}`);
@@ -272,43 +266,41 @@ export default defineComponent({
       }
 
       playerUpdate.name = name.value;
-      playerUpdate.ready = true;
       playerUpdate.event = Event.joined;
       currentPlayerRef.update(playerUpdate);
-      updateTime();
-      modalVisible.value = false;
-      // roomReady = true;
 
       otherPlayerRef.on("value", (snapshot) => {
         const playerUpdate = snapshot.val() as Player;
         otherPlayer.value = playerUpdate;
         switch (playerUpdate.event) {
           case Event.joined: {
-            message.info(`${playerUpdate.name} joined Game!`);
+            message.info(`Player joined Game!`);
             break;
           }
           case Event.left: {
-            message.info("Other player left");
+            if (playerUpdate.name !== ''){
+              message.info("Other player left");
+            }
             // reset game
             clearBoard();
             lastMove.value = { col: -1, row: -1 };
             myTurn.value = true;
-            const playerUpdate = {} as Player;
-            playerUpdate.color = "b";
-            playerUpdate.event = Event.updateStatus;
-            currentPlayerRef.update(playerUpdate);
+            const newPlayerUpdate = {} as Player;
+            newPlayerUpdate.color = "b";
+            newPlayerUpdate.event = Event.updateStatus;
+            currentPlayerRef.update(newPlayerUpdate);
             break;
           }
           case Event.move: {
             board.value[playerUpdate.move.row][playerUpdate.move.col] =
               playerUpdate.color;
             lastMove.value = playerUpdate.move;
-            myTurn.value = true
+            myTurn.value = true;
             break;
           }
           case Event.win: {
             // other player win
-            myTurn.value = playerUpdate.color === 'w'?true:false
+            myTurn.value = playerUpdate.color === "w" ? true : false;
             Modal.info({
               title: `${playerUpdate.name} won.`,
               onOk() {
@@ -322,110 +314,105 @@ export default defineComponent({
             break;
           }
           case Event.admitDefeat: {
-            // i win!
-            Modal.success({
-              title: `You won!`,
-              onOk() {
-                clearBoard();
-                const readyUpdate = {} as Player;
-                readyUpdate.ready = true;
-                readyUpdate.event = Event.updateStatus;
-                currentPlayerRef.update(readyUpdate);
-              },
-            });
-            const playerUpdate = {
-              event: Event.win,
-            } as Player;
-            playerUpdate.event = Event.win;
-            // switch color
-            playerUpdate.color = currentPlayer.value.color === "w" ? "b" : "w";
-            myTurn.value = playerUpdate.color === "w" ? false : true;
-            playerUpdate.ready = false;
-            currentPlayerRef.update(playerUpdate);
-
-            // update other player's status
-            const otherPlayerUpdate = {} as Player;
-            otherPlayerUpdate.color =
-              otherPlayer.value.color === "w" ? "b" : "w";
-            otherPlayerUpdate.ready = false;
-            otherPlayerUpdate.event = Event.updateStatus;
-            otherPlayerRef.update(otherPlayerUpdate);
-            updateTime();
-            break
+            IWin()
+            break;
           }
           case Event.requestToUndo: {
             // flush event in case this is the second time get undo request.
-            playerUpdate.event = Event.updateStatus;
-            currentPlayerRef.update(playerUpdate);
+            currentPlayerRef.update({event: Event.updateStatus} as Player);
             Modal.confirm({
               title: `Allow ${otherPlayer.value.name} to undo?`,
               cancelText: "Don't allow.",
               onOk() {
-                board.value[lastMove.value.row][lastMove.value.col] = 'e'
-                lastMove.value.col = -1
-                lastMove.value.row = -1
-                myTurn.value = false
-                const playerUpdate = {} as Player;
-                playerUpdate.event = Event.undoAccepted;
-                currentPlayerRef.update(playerUpdate);
+                board.value[lastMove.value.row][lastMove.value.col] = "e";
+                lastMove.value.col = -1;
+                lastMove.value.row = -1;
+                myTurn.value = false;
+                currentPlayerRef.update({event: Event.undoAccepted} as Player);
                 updateTime();
-                message.info('Sent')
+                message.info("Sent");
               },
-              onCancel(){
-                const playerUpdate = {} as Player;
-                playerUpdate.event = Event.undoDeclined;
-                currentPlayerRef.update(playerUpdate);
+              onCancel() {
+                currentPlayerRef.update({event: Event.undoDeclined} as Player);
                 updateTime();
-                message.info('Sent')
-              }
+                message.info("Sent");
+              },
             });
-            break
+            break;
           }
           case Event.undoDeclined: {
-            message.info(`${otherPlayer.value.name} declined your undo request.`)
-            break
+            message.info(
+              `${otherPlayer.value.name} declined your undo request.`
+            );
+            break;
           }
           case Event.undoAccepted: {
-            message.success(`${otherPlayer.value.name} accepted your undo request.`)
-            board.value[lastMove.value.row][lastMove.value.col] = 'e'
-            lastMove.value.col = -1
-            lastMove.value.row = -1
-            myTurn.value = true
-            break
+            message.success(
+              `${otherPlayer.value.name} accepted your undo request.`
+            );
+            board.value[lastMove.value.row][lastMove.value.col] = "e";
+            lastMove.value.col = -1;
+            lastMove.value.row = -1;
+            myTurn.value = true;
+            break;
           }
         }
       });
 
       currentPlayerRef.on("value", (snapshot) => {
         // receive update for my info
-        currentPlayer.value = snapshot.val();
+        const update = snapshot.val() as Player
+        if (update.name !== currentPlayer.value.name && currentPlayer.value.name === ''){
+          // you didn't quit the room now a new player is playing
+          // quit
+          context.emit("exit");
+        }
+        currentPlayer.value = update;
       });
+    });
+
+    const updateName = async () => {
+      if (name.value === "") {
+        message.warning("Name cannot be empty.");
+        return;
+      }
+      if (name.value === otherPlayer.value.name) {
+          message.warning("This name is same as other player's name!");
+          return;
+        }
+      const playerUpdate = {} as Player;
+      playerUpdate.ready = true
+      playerUpdate.event = Event.updateStatus;
+      playerUpdate.name = name.value;
+      currentPlayerRef.update(playerUpdate);
+      updateTime();
+      modalVisible.value = false;
     };
 
     const admitDefeat = () => {
       Modal.confirm({
         title: `Admit defeat?`,
         onOk() {
-          const playerUpdate = {} as Player;
-          playerUpdate.event = Event.admitDefeat;
-          currentPlayerRef.update(playerUpdate);
+          currentPlayerRef.update({event: Event.admitDefeat} as Player);
           updateTime();
         },
       });
     };
 
     const undo = () => {
+      if (currentPlayer.value.event === Event.requestToUndo){
+        message.info(`${otherPlayer.value.name} has declined your request.`)
+        return
+      }
       Modal.confirm({
         title: `Undo?`,
         onOk() {
-          message.info('Request sent. Please wait for feedback.')
-          const playerUpdate = {} as Player;
-          playerUpdate.event = Event.requestToUndo;
-          currentPlayerRef.update(playerUpdate);
+          message.info("Request sent. Please wait for feedback.");
+          currentPlayerRef.update({event: Event.requestToUndo} as Player);
           updateTime();
         },
       });
-    }
+    };
 
     onUnmounted(() => {
       if (currentPlayerRef != undefined) currentPlayerRef.off();
@@ -434,12 +421,13 @@ export default defineComponent({
     });
 
     return {
+      Event,
       board,
       placePiece,
       myTurn,
       playerToMove,
       modalVisible,
-      enterRoom,
+      updateName,
       exit,
       name,
       currentPlayer,
@@ -459,6 +447,7 @@ export default defineComponent({
   width: 405px;
   margin: auto;
   padding: 10px;
+  box-shadow: 0 4px 8px 0 rgba(0, 0, 0, 0.2), 0 6px 20px 0 rgba(0, 0, 0, 0.19);
 }
 .tile {
   height: 25px;
