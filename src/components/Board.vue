@@ -2,9 +2,9 @@
   <div>
     <a-modal v-model:visible="modalVisible" title="Info" :closable="false">
       <a-input
-        v-model:value="player.name"
+        v-model:value="name"
         placeholder="Put your name here"
-        @pressEnter="nameReady"
+        @pressEnter="enterRoom"
       />
       <template #footer>
         <a-button key="submit" type="primary" @click="$emit('exit')">
@@ -13,83 +13,91 @@
         <a-button
           key="submit"
           type="primary"
-          @click="nameReady"
-          :disabled="player.name == ''"
+          @click="enterRoom"
+          :disabled="name == ''"
         >
           OK
         </a-button>
       </template>
     </a-modal>
-    <h2>Room {{ Number.parseInt(roomId) + 1 }} Hello, {{ player.name }}</h2>
-    <table style="margin: auto; text-align: left;">
+    <h2>
+      Room {{ Number.parseInt(roomId) + 1 }} Hello, {{ currentPlayer.name }}
+    </h2>
+    <table style="margin: auto; text-align: left">
       <tr>
         <td>
-          <ArrowRightOutlined
-            style="width: 30px"
-            v-if="(isOwner && myTurn) || (!isOwner && !myTurn)"
-          />
+          <ArrowRightOutlined style="width: 30px" v-if="myTurn" />
         </td>
         <td>
-          <a-badge status="success" v-if="room.ownerReady"/>
-          <a-badge status="processing" v-else/>
+          <a-badge status="success" v-if="currentPlayer.ready" />
+          <a-badge status="processing" v-else />
         </td>
-        <td>Owner <span v-if="isOwner"> (You) </span>:</td>
-        <td style="padding-left: 20px">{{ room.owner.name }}</td>
-        <td style="padding-left: 10px">
+        <td>{{ currentPlayer.name }}</td>
+        <td style="padding-left: 20px">
           <div
             class="black-peice"
             style="margin: auto"
-            v-if="room.owner.color === 'b'"
+            v-if="currentPlayer.color === 'b'"
           ></div>
           <div class="white-peice" style="margin: auto" v-else></div>
         </td>
       </tr>
-      <tr v-if="room.player != 'empty'">
+      <tr v-if="otherPlayer.name != ''">
         <td>
-          <ArrowRightOutlined
-            style="width: 30px"
-            v-if="(!isOwner && myTurn) || (isOwner && !myTurn)"
-          />
+          <ArrowRightOutlined style="width: 30px" v-if="!myTurn" />
         </td>
         <td>
-          <a-badge status="success" v-if="room.playerReady"/>
-          <a-badge status="processing" v-else/>
-          </td>
-        <td>Player <span v-if="!isOwner"> (You) </span>:</td>
-        <td style="padding-left: 20px">{{ room.player.name }}</td>
-        <td style="padding-left: 10px">
+          <a-badge status="success" v-if="otherPlayer.ready" />
+          <a-badge status="processing" v-else />
+        </td>
+        <td>{{ otherPlayer.name }}</td>
+        <td style="padding-left: 20px">
           <div
             class="black-peice"
             style="margin: auto"
-            v-if="room.player.color === 'b'"
+            v-if="otherPlayer.color === 'b'"
           ></div>
           <div class="white-peice" style="margin: auto" v-else></div>
         </td>
       </tr>
     </table>
 
-    <h4 v-if="room.player != 'empty'">{{ playerToMove }} turn</h4>
+    <h4 v-if="otherPlayer.name != ''">{{ playerToMove }} turn</h4>
     <h4 v-else>Waiting for player...</h4>
     <div class="board">
       <div v-for="row in 15" :key="row" style="height: 25px">
         <div
           v-for="col in 15"
           :key="col"
-          :class="{tile: true, notAllowed: !myTurn, blink_me: row-1 === room.move.row && col-1 === room.move.col}"
+          :class="{
+            tile: true,
+            notAllowed: !myTurn || !playersReady,
+            blink_me: row - 1 === lastMove.row && col - 1 === lastMove.col,
+          }"
           @click="placePiece(row - 1, col - 1)"
         >
-          <div :class="{'black-peice': true, }" v-if="board[row - 1][col - 1] === 'b'"></div>
           <div
-            :class="{'white-peice': true, }"
+            :class="{ 'black-peice': true }"
+            v-if="board[row - 1][col - 1] === 'b'"
+          ></div>
+          <div
+            :class="{ 'white-peice': true }"
             v-else-if="board[row - 1][col - 1] === 'w'"
+          ></div>
+          <div
+            :class="{
+              'white-peice-shade': currentPlayer.color === 'w',
+              'black-peice-shade': currentPlayer.color === 'b',
+            }"
+            v-else-if="myTurn"
           ></div>
         </div>
       </div>
     </div>
     <br />
     <a-space>
-      <a-button >Admit defeat</a-button>
-      <a-button >Undo</a-button>
+      <a-button @click="admitDefeat" :disabled="!playersReady">Admit defeat</a-button>
+      <a-button :disabled="myTurn">Undo</a-button>
       <a-button @click="exit">Exit<LogoutOutlined /></a-button>
     </a-space>
   </div>
@@ -101,7 +109,7 @@ import firebase from "firebase/app";
 import "firebase/database";
 import { LogoutOutlined, ArrowRightOutlined } from "@ant-design/icons-vue";
 import { message, Modal } from "ant-design-vue";
-import { Room, Player } from "@/interface";
+import { Room, Event, Player } from "@/interface";
 import { check } from "@/checkWin";
 
 export default defineComponent({
@@ -117,266 +125,273 @@ export default defineComponent({
   },
   setup(props, context) {
     const board = ref([] as string[][]);
-    const room = ref({ owner: { name: "" }, player: "empty", move:{row: -1, col: -1} } as Room);
+    const name = ref("");
+    const player: Player = {
+      name: "",
+      color: "b",
+      ready: true,
+      event: Event.joined,
+      move: { row: 0, col: 0 },
+    };
+    const currentPlayer = ref(player);
+    const otherPlayer = ref(player);
     const myTurn = ref(true);
-    const player = ref({ name: "", color: "b" } as Player);
-    const roomReady = ref(false);
+    let roomReady = false;
     const roomRef = firebase.database().ref(props.roomId);
-    const isOwner = ref(true);
+    const lastMove = ref({ col: -1, row: -1 });
     const playerToMove = computed((): string => {
-      if (myTurn.value) {
-        return "Your";
-      }
-      if (room.value.player !== "empty") {
-        return `${
-          isOwner.value ? room.value.player.name : room.value.owner.name
-        }'s`;
-      }
-      return "";
+      return myTurn.value ? "Your" : otherPlayer.value.name;
+    });
+
+    const playersReady = computed(() => {
+      return currentPlayer.value.ready && otherPlayer.value.ready;
     });
     const modalVisible = ref(true);
+    let currentPlayerRef: firebase.database.Reference;
+    let otherPlayerRef: firebase.database.Reference;
+    const updateTime = () => {
+      const roomUpdate = {} as Room;
+      roomUpdate.lastUpdateTime = firebase.database.ServerValue
+        .TIMESTAMP as number;
+      firebase.database().ref(props.roomId).update(roomUpdate);
+    };
     const exit = () => {
-      if (isOwner.value) {
-        room.value.command = "owner left";
-        room.value.lastUpdateTime = 0;
-        roomRef.set(room.value).then(() => {
-          context.emit("exit");
-        });
-      } else {
-        const newRoomInfo = {
-          owner: room.value.owner,
-          player: "empty",
-          command: "player left",
-          lastUpdateTime: firebase.database.ServerValue.TIMESTAMP,
-        } as Room;
-        newRoomInfo.owner.color = 'b';
-        roomRef.update(newRoomInfo).then(() => {
-          context.emit("exit");
-        });
-      }
+      const playerUpdate = {} as Player;
+      playerUpdate.name = "";
+      playerUpdate.event = Event.left;
+      currentPlayerRef.update(playerUpdate);
+      context.emit("exit");
     };
 
     // setup board
-    const clear = () => {
+    const clearBoard = () => {
       for (let i = 0; i < 15; ++i) {
         board.value[i] = new Array(15).fill("e");
       }
+      lastMove.value = { col: -1, row: -1 };
     };
-    clear();
+    clearBoard();
     const placePiece = (row: number, col: number) => {
       if (
         board.value[row][col] !== "e" ||
         !myTurn.value ||
-        room.value.player === "empty" ||
-        !room.value.ownerReady ||
-        !room.value.playerReady
+        !roomReady ||
+        !playersReady.value
       )
         return;
-      const roomNewMove = {
+      board.value[row][col] = currentPlayer.value.color;
+      const playerUpdate = {
         move: {
-          color: player.value.color,
           row: row,
           col: col,
         },
-        command: "move",
-        lastUpdateTime: firebase.database.ServerValue.TIMESTAMP,
-      } as Room;
-      roomRef.update(roomNewMove);
+        event: Event.move,
+      } as Player;
+      currentPlayerRef.update(playerUpdate);
+      if (check(board.value) === currentPlayer.value.color) {
+        Modal.success({
+          title: `You won!`,
+          onOk() {
+            clearBoard();
+            const readyUpdate = {} as Player;
+            readyUpdate.ready = true;
+            readyUpdate.event = Event.updateStatus;
+            currentPlayerRef.update(readyUpdate);
+          },
+        });
+        // i win!
+        playerUpdate.event = Event.win;
+        // switch color
+        playerUpdate.color = currentPlayer.value.color === "w" ? "b" : "w";
+        myTurn.value = playerUpdate.color === "w" ? false : true;
+        playerUpdate.ready = false;
+        currentPlayerRef.update(playerUpdate);
+
+        // update other player's status
+        const otherPlayerUpdate = {} as Player;
+        otherPlayerUpdate.color = otherPlayer.value.color === "w" ? "b" : "w";
+        otherPlayerUpdate.ready = false;
+        otherPlayerUpdate.event = Event.updateStatus;
+        otherPlayerRef.update(otherPlayerUpdate);
+      }
+      else{
+        myTurn.value = false;
+      }
+      lastMove.value = playerUpdate.move;
+      updateTime();
     };
 
     // setup room
-    const nameReady = () => {
-      if (player.value.name === "") {
+    const enterRoom = async () => {
+      if (name.value === "") {
         message.warning("Name cannot be empty.");
         return;
       }
-      roomRef.once("value").then((snapshot) => {
-        const roomIfno = snapshot.val() as Room;
-        if (
-          roomIfno === null ||
-          new Date().getTime() - roomIfno.lastUpdateTime > 1000 * 60 * 15
-        ) {
-          // first enter room, setup room
-          const newRoom = {
-            owner: player.value,
-            player: "empty",
-            command: "room created",
-            ownerReady: true,
-            move: {row: -1, col: -1},
-            lastUpdateTime: firebase.database.ServerValue.TIMESTAMP, // milisecond
-          } as Room;
-          roomRef.set(newRoom);
-        } else if (roomIfno.player === "empty") {
-          if (player.value.name === roomIfno.owner.name){
-            message.warning("This name is same other player's name");
-            return;
-          }
-          player.value.color = "w";
-          isOwner.value = false;
-          myTurn.value = false;
-          const newRoom = {
-            playerReady: true,
-            player: player.value,
-            lastUpdateTime: firebase.database.ServerValue.TIMESTAMP,
-            command: "player joined",
-          } as Room;
-          roomRef.update(newRoom);
+      const roomInfo = (await roomRef.once("value")).val() as Room;
+      const playerUpdate = {} as Player;
+      if (
+        roomInfo === null ||
+        new Date().getTime() - roomInfo.lastUpdateTime > 1000 * 60 * 15 ||
+        (roomInfo.player1.event === Event.left &&
+          roomInfo.player2.event === Event.left)
+      ) {
+        currentPlayerRef = firebase.database().ref(`${props.roomId}/player1`);
+        otherPlayerRef = firebase.database().ref(`${props.roomId}/player2`);
+        const roomUpdate: Room = {
+          player1: {
+            name: "",
+            color: "w",
+            ready: false,
+            move: { col: -1, row: -1 },
+            event: Event.updateStatus,
+          },
+          player2: {
+            name: "",
+            color: "b",
+            ready: false,
+            move: { col: -1, row: -1 },
+            event: Event.updateStatus,
+          },
+          lastUpdateTime: firebase.database.ServerValue.TIMESTAMP as number,
+        };
+        roomRef.set(roomUpdate);
+        playerUpdate.color = "b";
+      } else {
+        const me = roomInfo.player1.name === "" ? "player1" : "player2";
+        const other = roomInfo.player1.name === "" ? "player2" : "player1";
+        if (name.value === roomInfo[other].name) {
+          message.warning("This name is same as other player's name!");
+          return;
         }
-        modalVisible.value = false;
-        roomReady.value = true;
-      });
-    };
-    roomRef.on("value", (snapshot) => {
-      const roomData = snapshot.val() as Room;
-      if (roomData == null || !roomReady.value) return;
-      room.value = roomData;
-      switch (roomData.command) {
-        case "owner left":
-          message.info("Room owner left game.");
-          context.emit("exit");
-          break;
-        case "player left":
-          if (isOwner.value) {
-            message.info("Player left game.");
+        myTurn.value = false;
+        playerUpdate.color = "w";
+        currentPlayerRef = firebase.database().ref(`${props.roomId}/${me}`);
+        otherPlayerRef = firebase.database().ref(`${props.roomId}/${other}`);
+      }
+
+      playerUpdate.name = name.value;
+      playerUpdate.ready = true;
+      playerUpdate.event = Event.joined;
+      currentPlayerRef.update(playerUpdate);
+      updateTime();
+      modalVisible.value = false;
+      roomReady = true;
+
+      otherPlayerRef.on("value", (snapshot) => {
+        const playerUpdate = snapshot.val() as Player;
+        otherPlayer.value = playerUpdate;
+        switch (playerUpdate.event) {
+          case Event.joined: {
+            message.info(`${playerUpdate.name} joined Game!`);
+            break;
+          }
+          case Event.left: {
+            message.info("Other player left");
             // reset game
+            clearBoard();
+            lastMove.value = { col: -1, row: -1 };
             myTurn.value = true;
-            player.value.color = 'b'
-            clear();
+            const playerUpdate = {} as Player;
+            playerUpdate.color = "b";
+            playerUpdate.event = Event.updateStatus;
+            currentPlayerRef.update(playerUpdate);
+            break;
           }
-          break;
-        case "player joined":
-          if (roomData.player !== "empty" && isOwner.value) {
-            message.info(`${roomData.player.name} joined game.`);
+          case Event.move: {
+            board.value[playerUpdate.move.row][playerUpdate.move.col] =
+              playerUpdate.color;
+            lastMove.value = playerUpdate.move;
+            myTurn.value = true
+            break;
           }
-          break;
-        case "move":
-          if (board.value[roomData.move.row][roomData.move.col] === "e") {
-            board.value[roomData.move.row][roomData.move.col] =
-              roomData.move.color;
-            // if this is my move, i'll receive update twice!!!
-            // reason is we used server timestamp, when server set a new time,
-            // we receive another update
-            myTurn.value = !myTurn.value;
-            // console.log(check(board.value));
-          } else if (roomData.move.color === player.value.color) {
-            // this is the second update
-            // check win after I make a move
-            if (check(board.value) === player.value.color) {
-              // I win
-              Modal.success({
-                title: "You won!",
-                onOk() {
-                  clear();
-                  const ready = {
-                    move:{col: -1, row: -1},
-                    command: 'ready',
-                    lastUpdateTime: firebase.database.ServerValue.TIMESTAMP,
-                  } as Room;
-                  if (isOwner.value) {
-                    ready.ownerReady = true;
-                  } else {
-                    ready.playerReady = true;
-                  }
-                  roomRef.update(ready);
-                },
-              });
-              const gameResult = {
-                owner: room.value.owner,
-                player: room.value.player,
-                command: "player win",
-                playerReady: false,
-                ownerReady: false,
-                lastUpdateTime: firebase.database.ServerValue.TIMESTAMP,
-              } as Room;
-              if (isOwner.value) {
-                gameResult.command = "owner win";
-              }
-              if (gameResult.player !== "empty") {
-                // switch color
-                gameResult.owner.color =
-                  gameResult.owner.color === "w" ? "b" : "w";
-                gameResult.player.color =
-                  gameResult.player.color === "w" ? "b" : "w";
-              }
-              roomRef.update(gameResult);
-            }
-          }
-          break;
-        case "owner win":
-          if (!isOwner.value) {
-            // i'm player
-            // owner win, display modal
+          case Event.win: {
+            // other player win
+            myTurn.value = playerUpdate.color === 'w'?true:false
             Modal.info({
-              title: `${room.value.owner.name} won.`,
+              title: `${playerUpdate.name} won.`,
               onOk() {
-                clear();
-                const ready = {
-                  move:{col: -1, row: -1},
-                  command: 'ready',
-                  lastUpdateTime: firebase.database.ServerValue.TIMESTAMP,
-                } as Room;
-                ready.playerReady = true;
-                roomRef.update(ready);
+                clearBoard();
+                const readyUpdate = {} as Player;
+                readyUpdate.ready = true;
+                readyUpdate.event = Event.updateStatus;
+                currentPlayerRef.update(readyUpdate);
               },
             });
-            if (roomData.player !== "empty") {
-              player.value.color = roomData.player.color;
-            }
-          } else {
-            // i'm owner this is I win
-            player.value.color = roomData.owner.color;
+            break;
           }
-          myTurn.value = player.value.color === "b" ? true : false;
-          break;
-        case "player win":
-          if (isOwner.value) {
-            // i'm owner
-            // player win, display modal
-            if (room.value.player != "empty") {
-              Modal.info({
-                title: `${room.value.player.name} won.`,
-                onOk() {
-                  clear();
-                  const ready = {
-                    move:{col: -1, row: -1},
-                    command: 'ready',
-                    lastUpdateTime: firebase.database.ServerValue.TIMESTAMP,
-                  } as Room;
-                  ready.ownerReady = true;
-                  roomRef.update(ready);
-                },
-              });
-            }
-            player.value.color = roomData.owner.color;
-          } else {
-            // i'm player, this is i win
-            if (roomData.player !== "empty") {
-              player.value.color = roomData.player.color;
-            }
+          case Event.admitDefeat: {
+            // i win!
+            Modal.success({
+              title: `You won!`,
+              onOk() {
+                clearBoard();
+                const readyUpdate = {} as Player;
+                readyUpdate.ready = true;
+                readyUpdate.event = Event.updateStatus;
+                currentPlayerRef.update(readyUpdate);
+              },
+            });
+            const playerUpdate = {
+              event: Event.win,
+            } as Player;
+            playerUpdate.event = Event.win;
+            // switch color
+            playerUpdate.color = currentPlayer.value.color === "w" ? "b" : "w";
+            myTurn.value = playerUpdate.color === "w" ? false : true;
+            playerUpdate.ready = false;
+            currentPlayerRef.update(playerUpdate);
+
+            // update other player's status
+            const otherPlayerUpdate = {} as Player;
+            otherPlayerUpdate.color =
+              otherPlayer.value.color === "w" ? "b" : "w";
+            otherPlayerUpdate.ready = false;
+            otherPlayerUpdate.event = Event.updateStatus;
+            otherPlayerRef.update(otherPlayerUpdate);
+            updateTime();
+            
           }
-          myTurn.value = player.value.color === "b" ? true : false;
-          break;
-        default:
-        // code block
-      }
-    });
+        }
+      });
+
+      currentPlayerRef.on("value", (snapshot) => {
+        // receive update for my info
+        currentPlayer.value = snapshot.val();
+      });
+    };
+
+    const admitDefeat = () => {
+      Modal.confirm({
+        title: `Admit defeat?`,
+        onOk() {
+          const playerUpdate = {} as Player;
+          playerUpdate.event = Event.admitDefeat;
+          currentPlayerRef.update(playerUpdate);
+          updateTime();
+        },
+      });
+    };
 
     onUnmounted(() => {
+      if (currentPlayerRef != undefined) currentPlayerRef.off();
+      if (otherPlayerRef != undefined) otherPlayerRef.off();
       roomRef.off();
     });
 
     return {
       board,
-      clear,
       placePiece,
-      room,
       myTurn,
-      isOwner,
       playerToMove,
       modalVisible,
-      player,
-      nameReady,
+      enterRoom,
       exit,
+      name,
+      currentPlayer,
+      otherPlayer,
+      playersReady,
+      lastMove,
+      admitDefeat
     };
   },
 });
@@ -415,10 +430,40 @@ export default defineComponent({
   box-sizing: border-box;
   border: 1px solid rgb(78, 78, 78);
 }
+.black-peice-shade {
+  height: 27px;
+  width: 27px;
+}
+.black-peice-shade:hover {
+  height: 15px;
+  width: 15px;
+  background-color: rgb(85, 102, 117);
+  opacity: 0.5;
+  margin: auto;
+  margin-top: 4px;
+  border-radius: 7px;
+  box-sizing: border-box;
+  border: 1px solid rgb(78, 78, 78);
+}
 .white-peice {
   height: 15px;
   width: 15px;
   background-color: rgb(233, 233, 233);
+  margin: auto;
+  margin-top: 4px;
+  border-radius: 7px;
+  box-sizing: border-box;
+  border: 1px solid rgb(78, 78, 78);
+}
+.white-peice-shade {
+  height: 27px;
+  width: 27px;
+}
+.white-peice-shade:hover {
+  height: 15px;
+  width: 15px;
+  background-color: rgb(233, 233, 233);
+  opacity: 0.5;
   margin: auto;
   margin-top: 4px;
   border-radius: 7px;

@@ -4,7 +4,7 @@
       style="max-width: 800px; text-align: center; margin: auto"
       v-if="selectedRoom === ''"
     >
-    <h2>Room list - click to enter.</h2>
+      <h2>Room list - click to enter.</h2>
       <a-button
         v-for="index in numOfRooms"
         :key="index"
@@ -47,7 +47,7 @@
 <script lang="ts">
 import { defineComponent, ref } from "vue";
 import Board from "./components/Board.vue";
-import { Room } from "@/interface";
+import { Room, Event } from "@/interface";
 import firebase from "firebase/app";
 import "firebase/database";
 import {
@@ -73,32 +73,39 @@ export default defineComponent({
     let rooms: Room[];
     const updateHall = () => {
       hall.value = new Array(numOfRooms.value).fill("e");
+      if (rooms === null) return
       for (let id = 0; id < numOfRooms.value; ++id) {
         if (rooms[id] !== undefined) {
           // not active for 15min, treat as empty room
           if (
             new Date().getTime() - rooms[id].lastUpdateTime >
-            1000 * 60 * 15
+            1000 * 60 * 15 ||
+            (rooms[id].player1.event === Event.left &&
+            rooms[id].player2.event === Event.left)
           ) {
-            continue
+            continue;
           }
-          // waiting for player
-          else if (rooms[id].player === "empty") {
-            hall.value[id] = "w";
-          } else {
+          // gaming
+          else if (
+            rooms[id].player1.name !== "" &&
+            rooms[id].player2.name !== ""
+          ) {
             hall.value[id] = "o";
+          } else {
+            // only one player in the room
+            hall.value[id] = "w";
           }
         }
       }
-    }
+    };
     hallRef.on("value", (snapshot) => {
       rooms = snapshot.val() as Room[];
-      updateHall()
+      updateHall();
     });
 
     setInterval(() => {
-      updateHall()
-    }, 10000)
+      updateHall();
+    }, 10000);
     return {
       numOfRooms,
       hall,

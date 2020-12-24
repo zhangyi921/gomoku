@@ -1,17 +1,26 @@
 export interface Player {
-    name: string;
-    color: "w" | "b";
-  }
+  name: string;
+  color: 'w' | 'b';
+  ready: boolean;
+  move: {
+    row: number;
+    col: number;
+  };
+  event: Event;
+}
+
 export interface Room {
-    owner: Player;
-    player: Player | "empty";
-    ownerReady: boolean;
-    playerReady: boolean;
-    move: {
-      color: "w" | "b";
-      row: number;
-      col: number;
-    };
-    command: "player left" | 'player joined' | "owner left" | "owner win" | "player win" | 'move' | 'room created' | 'ready';
-    lastUpdateTime: number;
-  }
+  player1: Player;
+  player2: Player;
+  lastUpdateTime: number;
+}
+
+export enum Event {
+  win,
+  admitDefeat,
+  requestToUndo,
+  move,
+  updateStatus,
+  joined,
+  left,
+}
