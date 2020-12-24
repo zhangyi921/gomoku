@@ -5,6 +5,8 @@
         v-model:value="name"
         placeholder="Put your name here"
         @pressEnter="enterRoom"
+        :maxlength="20"
+        :allowClear="true"
       />
       <template #footer>
         <a-button key="submit" type="primary" @click="$emit('exit')">
@@ -250,7 +252,7 @@ export default defineComponent({
             color: "b",
             ready: false,
             move: { col: -1, row: -1 },
-            event: Event.updateStatus,
+            event: Event.left,
           },
           lastUpdateTime: firebase.database.ServerValue.TIMESTAMP as number,
         };
@@ -352,6 +354,9 @@ export default defineComponent({
             break
           }
           case Event.requestToUndo: {
+            // flush event in case this is the second time get undo request.
+            playerUpdate.event = Event.updateStatus;
+            currentPlayerRef.update(playerUpdate);
             Modal.confirm({
               title: `Allow ${otherPlayer.value.name} to undo?`,
               cancelText: "Don't allow.",
@@ -410,10 +415,6 @@ export default defineComponent({
     };
 
     const undo = () => {
-      if (currentPlayer.value.event === Event.requestToUndo){
-        message.info("Can't send undo request twice.")
-        return
-      }
       Modal.confirm({
         title: `Undo?`,
         onOk() {

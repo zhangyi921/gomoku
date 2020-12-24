@@ -1,7 +1,7 @@
 <template>
   <div>
     <div
-      style="max-width: 800px; text-align: center; margin: auto"
+      style="max-width: 80%; text-align: center; margin: auto"
       v-if="selectedRoom === ''"
     >
       <h2>Room list - click to enter.</h2>
@@ -43,7 +43,7 @@
     </transition>
 
     <br><br>
-    <h6>v1.0</h6>
+    <h6>v1.0.3</h6>
   </div>
 </template>
 
