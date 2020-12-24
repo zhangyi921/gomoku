@@ -41,6 +41,9 @@
         @exit="selectedRoom = ''"
       />
     </transition>
+
+    <br><br>
+    <h6>v1.0</h6>
   </div>
 </template>
 
@@ -122,7 +125,6 @@ export default defineComponent({
   -moz-osx-font-smoothing: grayscale;
   text-align: center;
   color: #2c3e50;
-  margin-top: 30px;
 }
 .fade-enter-active,
 .fade-leave-active {

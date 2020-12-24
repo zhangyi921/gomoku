@@ -19,6 +19,8 @@ export enum Event {
   win,
   admitDefeat,
   requestToUndo,
+  undoAccepted,
+  undoDeclined,
   move,
   updateStatus,
   joined,

@@ -97,7 +97,7 @@
     <br />
     <a-space>
       <a-button @click="admitDefeat" :disabled="!playersReady">Admit defeat</a-button>
-      <a-button :disabled="myTurn">Undo</a-button>
+      <a-button @click="undo" :disabled="myTurn || lastMove.col === -1">Undo</a-button>
       <a-button @click="exit">Exit<LogoutOutlined /></a-button>
     </a-space>
   </div>
@@ -136,7 +136,7 @@ export default defineComponent({
     const currentPlayer = ref(player);
     const otherPlayer = ref(player);
     const myTurn = ref(true);
-    let roomReady = false;
+    // let roomReady = false;
     const roomRef = firebase.database().ref(props.roomId);
     const lastMove = ref({ col: -1, row: -1 });
     const playerToMove = computed((): string => {
@@ -175,7 +175,7 @@ export default defineComponent({
       if (
         board.value[row][col] !== "e" ||
         !myTurn.value ||
-        !roomReady ||
+        // !roomReady ||
         !playersReady.value
       )
         return;
@@ -275,7 +275,7 @@ export default defineComponent({
       currentPlayerRef.update(playerUpdate);
       updateTime();
       modalVisible.value = false;
-      roomReady = true;
+      // roomReady = true;
 
       otherPlayerRef.on("value", (snapshot) => {
         const playerUpdate = snapshot.val() as Player;
@@ -349,7 +349,44 @@ export default defineComponent({
             otherPlayerUpdate.event = Event.updateStatus;
             otherPlayerRef.update(otherPlayerUpdate);
             updateTime();
-            
+            break
+          }
+          case Event.requestToUndo: {
+            Modal.confirm({
+              title: `Allow ${otherPlayer.value.name} to undo?`,
+              cancelText: "Don't allow.",
+              onOk() {
+                board.value[lastMove.value.row][lastMove.value.col] = 'e'
+                lastMove.value.col = -1
+                lastMove.value.row = -1
+                myTurn.value = false
+                const playerUpdate = {} as Player;
+                playerUpdate.event = Event.undoAccepted;
+                currentPlayerRef.update(playerUpdate);
+                updateTime();
+                message.info('Sent')
+              },
+              onCancel(){
+                const playerUpdate = {} as Player;
+                playerUpdate.event = Event.undoDeclined;
+                currentPlayerRef.update(playerUpdate);
+                updateTime();
+                message.info('Sent')
+              }
+            });
+            break
+          }
+          case Event.undoDeclined: {
+            message.info(`${otherPlayer.value.name} declined your undo request.`)
+            break
+          }
+          case Event.undoAccepted: {
+            message.success(`${otherPlayer.value.name} accepted your undo request.`)
+            board.value[lastMove.value.row][lastMove.value.col] = 'e'
+            lastMove.value.col = -1
+            lastMove.value.row = -1
+            myTurn.value = true
+            break
           }
         }
       });
@@ -372,6 +409,23 @@ export default defineComponent({
       });
     };
 
+    const undo = () => {
+      if (currentPlayer.value.event === Event.requestToUndo){
+        message.info("Can't send undo request twice.")
+        return
+      }
+      Modal.confirm({
+        title: `Undo?`,
+        onOk() {
+          message.info('Request sent. Please wait for feedback.')
+          const playerUpdate = {} as Player;
+          playerUpdate.event = Event.requestToUndo;
+          currentPlayerRef.update(playerUpdate);
+          updateTime();
+        },
+      });
+    }
+
     onUnmounted(() => {
       if (currentPlayerRef != undefined) currentPlayerRef.off();
       if (otherPlayerRef != undefined) otherPlayerRef.off();
@@ -391,7 +445,8 @@ export default defineComponent({
       otherPlayer,
       playersReady,
       lastMove,
-      admitDefeat
+      admitDefeat,
+      undo,
     };
   },
 });
