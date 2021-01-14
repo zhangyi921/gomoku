@@ -43,7 +43,7 @@
     </transition>
 
     <br><br>
-    <h6>v1.1.1</h6>
+    <h6>v1.1.2</h6>
   </div>
 </template>
 

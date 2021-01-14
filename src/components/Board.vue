@@ -97,10 +97,10 @@
     <br />
     <a-space>
       <a-button @click="admitDefeat" :disabled="!playersReady"
-        >Admit defeat</a-button
+        >Admit defeat<ThunderboltOutlined /></a-button
       >
       <a-button @click="undo" :disabled="myTurn || lastMove.col === -1"
-        >Undo</a-button
+        >Undo<UndoOutlined /></a-button
       >
       <a-button @click="exit">Exit<LogoutOutlined /></a-button>
     </a-space>
@@ -111,7 +111,7 @@
 import { computed, defineComponent, onUnmounted, ref } from "vue";
 import firebase from "firebase/app";
 import "firebase/database";
-import { LogoutOutlined, ArrowRightOutlined } from "@ant-design/icons-vue";
+import { LogoutOutlined, ArrowRightOutlined, UndoOutlined, ThunderboltOutlined } from "@ant-design/icons-vue";
 import { message, Modal } from "ant-design-vue";
 import { Room, Event, Player } from "@/interface";
 import { check } from "@/checkWin";
@@ -120,6 +120,8 @@ export default defineComponent({
   components: {
     LogoutOutlined,
     ArrowRightOutlined,
+    UndoOutlined,
+    ThunderboltOutlined
   },
   props: {
     roomId: {
@@ -362,7 +364,8 @@ export default defineComponent({
       currentPlayerRef.on("value", (snapshot) => {
         // receive update for my info
         const update = snapshot.val() as Player
-        if (update.name !== currentPlayer.value.name && currentPlayer.value.name === ''){
+        debugger
+        if (update.name !== currentPlayer.value.name && currentPlayer.value.name !== ''){
           // you didn't quit the room now a new player is playing
           // quit
           context.emit("exit");
