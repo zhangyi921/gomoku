@@ -1,4 +1,4 @@
-# gomoku
+# gomoku123
 
 ## Project setup
 ```
